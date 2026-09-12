@@ -37,7 +37,41 @@ async function brainHealth(){
   }catch(e){ return {ok:false}; }
 }
 
+/* ===== 星河记忆库（大脑服务器） ===== */
+async function brainGetMem(){
+  const res = await fetch(YU_BRAIN + '/memory');
+  if(!res.ok) return [];
+  return await res.json();
+}
+async function brainAddMem(text, imp){
+  const res = await fetch(YU_BRAIN + '/memory', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ text, imp })
+  });
+  return res.json();
+}
+async function brainSummary(text){
+  const res = await fetch(YU_BRAIN + '/memory/summarize', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ text: text || '' })
+  });
+  return res.json();
+}
+
+/* ===== 聊天记录持久化 ===== */
+async function brainGetHist(){
+  const res = await fetch(YU_BRAIN + '/history');
+  if(!res.ok) return [];
+  return await res.json();
+}
+
 window.brainChat = brainChat;
 window.brainTool = brainTool;
 window.brainHealth = brainHealth;
+window.brainGetMem = brainGetMem;
+window.brainAddMem = brainAddMem;
+window.brainSummary = brainSummary;
+window.brainGetHist = brainGetHist;
 window.YU_BRAIN = YU_BRAIN;
