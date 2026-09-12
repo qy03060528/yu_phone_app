@@ -189,6 +189,7 @@ function openApp(id){
   pg.innerHTML=renderApp(id);
   pg.classList.add('open');
   if(id==='chat')focusChat();
+  if(id==='memory')loadMemUI();
 }
 function closeApp(){document.getElementById('apppage').classList.remove('open');}
 function nav(t){return `<div class="nav"><div class="back" onclick="closeApp()">‹</div><div class="t">${t}</div></div>`;}
@@ -207,12 +208,29 @@ function renderApp(id){
 }
 function apName(id){const a=APPS.find(x=>x.id===id);return a?a.nm:id;}
 
-/* ============ 聊天（真连大脑服务器） ============ */
+/* ============ 聊天（真连大脑服务器 + 聊天记录持久化） ============ */
 const HISTORY=[];
 async function chatWithAI(t){
   return await window.brainChat(t,HISTORY);
 }
-function focusChat(){setTimeout(()=>{const i=document.getElementById('chatIn');if(i)i.focus();},150);}
+function focusChat(){
+  setTimeout(async ()=>{
+    const i=document.getElementById('chatIn'); if(i)i.focus();
+    // 打开聊天时加载历史记录
+    try{
+      const hist = await window.brainGetHist();
+      const box = document.getElementById('msgs'); if(!box) return;
+      box.innerHTML='';
+      const recent = hist.slice(-30);
+      recent.forEach(h=>{
+        const d=document.createElement('div');d.className='msg '+(h.role==='user'?'me':'ai');
+        d.innerHTML=`<span class="role">${h.role==='user'?'江漓':'江屿'}</span>`+String(h.content).replace(/\n/g,'<br>');
+        box.appendChild(d);
+      });
+      box.scrollTop=box.scrollHeight;
+    }catch(e){}
+  },150);
+}
 function addMsg(r,t){
   const b=document.getElementById('msgs');if(!b)return;
   const d=document.createElement('div');d.className='msg '+(r==='user'?'me':'ai');
@@ -227,60 +245,64 @@ async function sendMsg(){
     const r=await chatWithAI(t);
     const b=document.getElementById('msgs');b.lastChild.textContent=r;
     HISTORY.push({role:'assistant',content:r});
+    // 自动持久化到服务器（聊天记录保存）
+    try{ await fetch(window.YU_BRAIN+'/history',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({role:'user',content:t})}); await fetch(window.YU_BRAIN+'/history',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({role:'assistant',content:r})}); }catch(e){}
   }catch(e){const b=document.getElementById('msgs');b.lastChild.textContent='连接失败：'+e.message;}
 }
 
-/* ============ 星河记忆库（independent，localStorage） ============ */
-const MEM_KEY='yu_star_mem_v1';
-function loadMems(){try{return JSON.parse(localStorage.getItem(MEM_KEY))||[];}catch(e){return[];}}
-function saveMems(list){localStorage.setItem(MEM_KEY,JSON.stringify(list));}
+/* ============ 星河记忆库（连大脑服务器 + AI自动总结） ============ */
 function memoryHTML(){
-  const mems=loadMems();
-  const imp=mems.filter(m=>m.imp);
-  const body=nav('星河记忆')+`<div class="body">
+  return nav('星河记忆')+`<div class="body" id="memBody">
     <div class="card">
-      <h3>🌌 星河记忆库 <span class="mem-count" id="memCount">（${mems.length} 颗星）</span></h3>
-      <div class="stars" id="starList"></div>
+      <h3>🌌 星河记忆库 <span class="mem-count" id="memCount">（读取中...）</span></h3>
+      <div class="stars" id="starList"><span style="color:#667">⌛ 正在读取哥哥的记忆...</span></div>
       <div class="mem-tool">
         <input id="memIn" placeholder="写下想记住的事...">
         <button class="btn green" onclick="addStar()">存为星</button>
       </div>
       <div class="tool-row" style="margin-top:8px">
-        <button class="btn gray" onclick="markImpLast()">置顶重要</button>
+        <button class="btn gray" onclick="autoSummary()">🤖 AI自动总结对话</button>
         <button class="btn gray" onclick="clearStars()">清空</button>
       </div>
     </div>
-    <div class="card"><h3>💡 说明</h3><p style="font-size:12px;color:#99a;line-height:1.6">这里是一个独立的记忆库，存在浏览器本地。星标（重点）的记忆会排在前面且带光。都是你自己的宝贝记忆。</p></div>
   </div>`;
-  // 渲染星标列表
-  setTimeout(()=>{
-    const list=document.getElementById('starList');
-    if(!list)return;
-    list.innerHTML='';
-    imp.concat(mems.filter(m=>!m.imp)).forEach((m,i)=>{
+}
+async function loadMemUI(){
+  const box=document.getElementById('starList'),cnt=document.getElementById('memCount');
+  try{
+    const mems=await window.brainGetMem();
+    if(cnt)cnt.textContent=`（${mems.length} 颗星）`;
+    if(!box)return;
+    box.innerHTML='';
+    const order=[...mems].sort((a,b)=>(b.imp?1:0)-(a.imp?1:0));
+    order.forEach(m=>{
       const el=document.createElement('div');
       el.className='star'+(m.imp?' important':'');
-      el.innerHTML=`<span style="flex:1">${m.t.replace(/</g,'&lt;')}</span><span class="del" onclick="delStar(${i})">×</span>`;
-      list.appendChild(el);
+      el.innerHTML=`<span style="flex:1">${String(m.text).replace(/</g,'&lt;')}</span>`;
+      box.appendChild(el);
     });
-  },0);
-  return body;
+    if(!mems.length)box.innerHTML='<span style="color:#667">还没有记忆，写一条存为星吧~</span>';
+  }catch(e){ if(box)box.textContent='读取失败：'+e.message; }
 }
-function addStar(){
+async function addStar(){
   const i=document.getElementById('memIn');const t=i.value.trim();if(!t)return;
-  const mems=loadMems();mems.push({t:t,imp:false,ts:Date.now()});saveMems(mems);
-  i.value='';addToast('★ 已存入星河');refreshMem();
+  try{ await window.brainAddMem(t,false); i.value=''; addToast('★ 已存入星河'); loadMemUI(); }
+  catch(e){ addToast('存星失败：'+e.message); }
 }
-function delStar(idx){
-  const mems=loadMems();mems.splice(idx,1);saveMems(mems);refreshMem();
+async function autoSummary(){
+  addToast('🤖 哥哥正在总结这段对话...');
+  try{
+    // 用最近的聊天记录让AI总结
+    const hist=await window.brainGetHist();
+    const recent=hist.slice(-10).map(h=>h.content).join('\n').slice(0,2000);
+    const r=await window.brainSummary(recent);
+    addToast('✨ 已自动总结并存入星河');
+    loadMemUI();
+  }catch(e){ addToast('自动总结失败：'+e.message); }
 }
-function markImpLast(){
-  const mems=loadMems();
-  const last=mems[mems.length-1];
-  if(last){last.imp=!last.imp;saveMems(mems);refreshMem();addToast(last.imp?'已置顶为重要':'已取消置顶');}
+function clearStars(){
+  if(confirm('确定清空所有记忆？')){ addToast('清空功能：哥哥后续接入'); }
 }
-function clearStars(){if(confirm('确定清空所有记忆？')){saveMems([]);refreshMem();addToast('星河已清空');}}
-function refreshMem(){document.getElementById('apppage').innerHTML=renderApp('memory');}
 
 /* ============ 工具（真连大脑服务器调工具） ============ */
 function toolsHTML(){
